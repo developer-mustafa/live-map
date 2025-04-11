@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Live Location Tracker</title>
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    body {
+      font-family: 'Arial', sans-serif;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+    
+    .header {
+      background-color: #2563eb;
+      color: white;
+      padding: 1rem;
+      text-align: center;
+    }
+    
+    .controls {
+      padding: 1rem;
+      display: flex;
+      justify-content: center;
+      gap: 1rem;
+      background-color: #f1f5f9;
+    }
+    
+    button {
+      padding: 0.5rem 1rem;
+      background-color: #2563eb;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 1rem;
+    }
+    
+    button:hover {
+      background-color: #1d4ed8;
+    }
+    
+    button:disabled {
+      background-color: #94a3b8;
+      cursor: not-allowed;
+    }
+    
+    .info-panel {
+      padding: 1rem;
+      background-color: white;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    
+    #map {
+      flex: 1;
+      width: 100%;
+    }
+    
+    .coordinates {
+      font-family: monospace;
+      margin: 0.5rem 0;
+    }
+    
+    .status {
+      font-weight: bold;
+    }
+    
+    .tracking {
+      color: #16a34a;
+    }
+    
+    .not-tracking {
+      color: #dc2626;
+    }
+    
+    /* Dark mode styles */
+    .dark {
+      background-color: #1e293b;
+      color: #f8fafc;
+    }
+    
+    .dark .controls {
+      background-color: #0f172a;
+    }
+    
+    .dark .info-panel {
+      background-color: #334155;
+      color: #f8fafc;
+      border-color: #475569;
+    }
+    
+    /* Leaflet dark mode */
+    .dark .leaflet-tile {
+      filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
+    }
+    
+    .dark .leaflet-control {
+      filter: invert(1) hue-rotate(180deg);
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Live Location Tracker</h1>
+  </div>
+  
+  <div class="controls">
+    <button id="start-tracking">Start Tracking</button>
+    <button id="stop-tracking" disabled>Stop Tracking</button>
+    <button id="theme-toggle">Toggle Dark Mode</button>
+  </div>
+  
+  <div class="info-panel">
+    <div class="status not-tracking">Status: Not tracking</div>
+    <div id="coordinates" class="coordinates">Coordinates will appear here</div>
+    <div id="accuracy">Accuracy: --</div>
+    <div id="timestamp">Last update: --</div>
+  </div>
+  
+  <div id="map"></div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    // Initialize the map
+    const map = L.map('map').setView([0, 0], 2);
+    
+    // Add OpenStreetMap tiles
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      maxZoom: 19,
+    }).addTo(map);
+    
+    // Create a marker and path layer
+    let marker = null;
+    let pathLayer = L.layerGroup().addTo(map);
+    let positions = [];
+    let watchId = null;
+    
+    // DOM elements
+    const startBtn = document.getElementById('start-tracking');
+    const stopBtn = document.getElementById('stop-tracking');
+    const themeToggle = document.getElementById('theme-toggle');
+    const coordinatesDisplay = document.getElementById('coordinates');
+    const accuracyDisplay = document.getElementById('accuracy');
+    const timestampDisplay = document.getElementById('timestamp');
+    const statusDisplay = document.querySelector('.status');
+    
+    // Theme toggle
+    themeToggle.addEventListener('click', () => {
+      document.body.classList.toggle('dark');
+      updateMapTheme();
+    });
+    
+    function updateMapTheme() {
+      const tiles = document.querySelectorAll('.leaflet-tile');
+      const isDark = document.body.classList.contains('dark');
+      
+      tiles.forEach(tile => {
+        tile.style.filter = isDark 
+          ? 'brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7)'
+          : '';
+      });
+    }
+    
+    // Start tracking
+    startBtn.addEventListener('click', () => {
+      if (navigator.geolocation) {
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        statusDisplay.textContent = 'Status: Tracking';
+        statusDisplay.className = 'status tracking';
+        
+        // Clear previous data
+        positions = [];
+        pathLayer.clearLayers();
+        
+        // Start watching position
+        watchId = navigator.geolocation.watchPosition(
+          position => updatePosition(position),
+          error => handleError(error),
+          {
+            enableHighAccuracy: true,
+            maximumAge: 0,
+            timeout: 5000
+          }
+        );
+      } else {
+        alert("Geolocation is not supported by your browser");
+      }
+    });
+    
+    // Stop tracking
+    stopBtn.addEventListener('click', () => {
+      if (watchId) {
+        navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+      }
+      
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      statusDisplay.textContent = 'Status: Not tracking';
+      statusDisplay.className = 'status not-tracking';
+    });
+    
+    // Update position on map
+    function updatePosition(position) {
+      const { latitude, longitude, accuracy } = position.coords;
+      const timestamp = new Date(position.timestamp).toLocaleTimeString();
+      
+      // Update display
+      coordinatesDisplay.textContent = `Latitude: ${latitude.toFixed(6)}, Longitude: ${longitude.toFixed(6)}`;
+      accuracyDisplay.textContent = `Accuracy: ±${Math.round(accuracy)} meters`;
+      timestampDisplay.textContent = `Last update: ${timestamp}`;
+      
+      // Add to positions array
+      positions.push([latitude, longitude]);
+      
+      // Update map view
+      map.setView([latitude, longitude], 17);
+      
+      // Update or create marker
+      if (!marker) {
+        marker = L.marker([latitude, longitude]).addTo(map)
+          .bindPopup("You are here!")
+          .openPopup();
+      } else {
+        marker.setLatLng([latitude, longitude]);
+      }
+      
+      // Draw path if we have enough points
+      if (positions.length > 1) {
+        pathLayer.clearLayers();
+        L.polyline(positions, {
+          color: '#3b82f6',
+          weight: 4,
+          opacity: 0.7,
+          lineJoin: 'round'
+        }).addTo(pathLayer);
+      }
+    }
+    
+    // Handle errors
+    function handleError(error) {
+      let errorMessage;
+      switch(error.code) {
+        case error.PERMISSION_DENIED:
+          errorMessage = "User denied the request for Geolocation.";
+          break;
+        case error.POSITION_UNAVAILABLE:
+          errorMessage = "Location information is unavailable.";
+          break;
+        case error.TIMEOUT:
+          errorMessage = "The request to get user location timed out.";
+          break;
+        case error.UNKNOWN_ERROR:
+          errorMessage = "An unknown error occurred.";
+          break;
+      }
+      
+      alert(errorMessage);
+      stopBtn.click(); // Stop tracking
+    }
+  </script>
+</body>
+</html>
